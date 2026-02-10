@@ -119,7 +119,7 @@ class Program
 
         try
         {
-            var response = await client.PostAsync("https://session.delphigamerz.xyz:80/upload", form);
+            var response = await client.PostAsync("https://session.delphigamerz.xyz/upload", form);
             response.EnsureSuccessStatusCode();
             Console.WriteLine($"File uploaded successfully: {await response.Content.ReadAsStringAsync()}");
         }
